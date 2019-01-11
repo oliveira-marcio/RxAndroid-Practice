@@ -18,9 +18,13 @@ import com.example.djmso.tmdbclient.service.RetrofitInstance;
 
 import java.util.ArrayList;
 
-import retrofit2.Call;
-import retrofit2.Callback;
-import retrofit2.Response;
+import io.reactivex.Observable;
+import io.reactivex.android.schedulers.AndroidSchedulers;
+import io.reactivex.disposables.CompositeDisposable;
+import io.reactivex.functions.Function;
+import io.reactivex.functions.Predicate;
+import io.reactivex.observers.DisposableObserver;
+import io.reactivex.schedulers.Schedulers;
 
 public class MainActivity extends AppCompatActivity {
 
@@ -29,6 +33,9 @@ public class MainActivity extends AppCompatActivity {
     private MovieAdapter movieAdapter;
     private SwipeRefreshLayout swipeRefreshLayout;
 
+    private Observable<MovieDBResponse> movieDBResponseObservable;
+    private CompositeDisposable compositeDisposable = new CompositeDisposable();
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -36,41 +43,59 @@ public class MainActivity extends AppCompatActivity {
 
         getSupportActionBar().setTitle("TMDB Popular Movies Today");
 
-        getPopuparMovies();
+        getPopuparMoviesRx();
 
         swipeRefreshLayout = findViewById(R.id.swipe_layout);
         swipeRefreshLayout.setColorSchemeResources(R.color.colorPrimary);
         swipeRefreshLayout.setOnRefreshListener(new SwipeRefreshLayout.OnRefreshListener() {
             @Override
             public void onRefresh() {
-                getPopuparMovies();
+                getPopuparMoviesRx();
             }
         });
     }
 
-    private void getPopuparMovies() {
+
+    private void getPopuparMoviesRx() {
         final MovieDataService movieDataService = RetrofitInstance.getService();
 
-        Call<MovieDBResponse> call = movieDataService.getPopularMovies(BuildConfig.TMDB_API_KEY);
+        movieDBResponseObservable = movieDataService.getPopularMoviesWithRx(BuildConfig.TMDB_API_KEY);
 
-        call.enqueue(new Callback<MovieDBResponse>() {
-            @Override
-            public void onResponse(Call<MovieDBResponse> call, Response<MovieDBResponse> response) {
-                swipeRefreshLayout.setRefreshing(false);
-                MovieDBResponse movieDBResponse = response.body();
+        compositeDisposable.add(movieDBResponseObservable
+                .subscribeOn(Schedulers.io())
+                .observeOn(AndroidSchedulers.mainThread())
+                .flatMap(new Function<MovieDBResponse, Observable<Movie>>() {
+                    @Override
+                    public Observable<Movie> apply(MovieDBResponse movieDBResponse) throws Exception {
+                        return Observable.fromArray(movieDBResponse.getMovies().toArray(new Movie[0]));
+                    }
+                })
+                .filter(new Predicate<Movie>() {
+                    @Override
+                    public boolean test(Movie movie) throws Exception {
+                        return movie.getVoteAverage() > 7.0;
+                    }
+                }) // Now we have a better control of data stream and we can apply filters, for example.
+                .subscribeWith(new DisposableObserver<Movie>() {
+                    @Override
+                    public void onNext(Movie movie) {
+                        movies.add(movie);
+                    }
 
-                if(movieDBResponse != null && movieDBResponse.getMovies() != null){
-                    movies = (ArrayList<Movie>) movieDBResponse.getMovies();
-                    showRecyclerView();
-                }
-            }
+                    @Override
+                    public void onError(Throwable e) {
 
-            @Override
-            public void onFailure(Call<MovieDBResponse> call, Throwable t) {
-                swipeRefreshLayout.setRefreshing(false);
-            }
-        });
+                    }
+
+                    @Override
+                    public void onComplete() {
+                        showRecyclerView();
+                        swipeRefreshLayout.setRefreshing(false);
+                    }
+                })
+        );
     }
+
 
     private void showRecyclerView() {
         recyclerView = findViewById(R.id.rvMovies);
@@ -86,5 +111,12 @@ public class MainActivity extends AppCompatActivity {
         recyclerView.setItemAnimator(new DefaultItemAnimator());
         recyclerView.setAdapter(movieAdapter);
         movieAdapter.notifyDataSetChanged();
+    }
+
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+
+        compositeDisposable.clear();
     }
 }
