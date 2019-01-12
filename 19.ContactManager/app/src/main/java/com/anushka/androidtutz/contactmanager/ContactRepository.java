@@ -2,7 +2,6 @@ package com.anushka.androidtutz.contactmanager;
 
 import android.app.Application;
 import android.arch.lifecycle.MutableLiveData;
-import android.arch.persistence.room.Room;
 import android.widget.Toast;
 
 import com.anushka.androidtutz.contactmanager.db.ContactsAppDatabase;
@@ -30,9 +29,8 @@ public class ContactRepository {
     public ContactRepository(Application application) {
         this.application = application;
 
-        contactsAppDatabase = Room
-                .databaseBuilder(application.getApplicationContext(), ContactsAppDatabase.class, "contactDB")
-                .build();
+        contactsAppDatabase = ContactsAppDatabase
+                .getDatabase(application.getApplicationContext());
 
         disposable.add(contactsAppDatabase
                 .getContactDAO()
